@@ -850,7 +850,7 @@ bot.on('message', (channel, tags, message, self) => {
   } else if (command.toLowerCase() === '!années') {
     bot.say(channel, "!1995, !2007, !1994, !1999, !2005, !liste (pour celle dont on s'occupe actuellement)")
   
-  petit test
+  petit nouveau test
     */
 
   
