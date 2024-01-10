@@ -849,4 +849,8 @@ bot.on('message', (channel, tags, message, self) => {
     bot.say(channel, "!année => Pour savoir les années que l'on a traité, !ajout => Pour ajouter une merde à ce zapping, !liste => pour avoir la liste des merdes de ce zapping, !contributeur => Pour savoir qui a listé les merdes de ce zapping")
   } else if (command.toLowerCase() === '!années') {
     bot.say(channel, "!1995, !2007, !1994, !1999, !2005, !liste (pour celle dont on s'occupe actuellement)")
-  */
+  
+  petit test
+    */
+
+  
