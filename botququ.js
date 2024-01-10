@@ -25,6 +25,8 @@ const coeursMapping = {
     5: 25, 6: 26, 7: 27, 8: 28, 9: 29
   }
 };
+const avatars = ['Artemis', 'Garnet', 'Janet', 'Shiva', 'BruceLee', 'GustavoFring', 'Kratos', 'Kronk', 'KylianMBappe', 'MuhammadAli', 'NikosAliagas', 'Obelix&Idefix', 'PhilippePoutou', 'Toad', 'TomNook', 'Aerith', 'Buffy', 'ChunLi', 'Connie', 'CouetteCouette', 'Daphne', 'FranFine', 'Mulan', 'Pecresse', 'Thatcher', 'Whoopie'];
+
 const bot = new tmi.Client({
   options: { debug: true },
   connection: {
@@ -82,6 +84,9 @@ let questionsRestantes = [...questions];
 let echecs = 0;
 let pokemonActuel = null;
 let pokemonCapturePar = {};
+let qpucEnCours = false;
+let participantsQPUC = new Set();
+let timerQPUC = null;
 
 app.use(bodyParser.json());
 
@@ -546,6 +551,81 @@ function mettreAJourPoints(gagnant) {
   });
 }
 
+/* ******************************
+*********************************
+*********************************
+*********************************
+QPUC A PARTIR DE ICI //
+*********************************
+*********************************
+*********************************
+*/
+function changerSceneQPUC() {
+  obs.call('SetCurrentProgramScene', {
+    'sceneName': 'QPUC' // Remplacez par le nom de votre scène QPUC dans OBS
+  }).then(() => {
+    console.log('Scène changée en QPUC');
+    ecrireNomsParticipants(); // Appeler la fonction pour écrire les noms dans les fichiers
+  }).catch(err => {
+    console.error('Erreur lors du changement de scène:', err);
+  });
+}
+
+// Écrire les noms des participants dans des fichiers
+function ecrireNomsParticipants() {
+  const participantsArray = Array.from(participantsQPUC);
+  console.log("Écriture des noms des participants dans les fichiers");
+
+  for (let i = 0; i < participantsArray.length && i < 4; i++) {
+    const filePath = `candidat${i + 1}.txt`;
+    const participantName = participantsArray[i];
+
+    fs.writeFile(filePath, participantName, (err) => {
+      if (err) {
+        console.error(`Erreur lors de l'écriture du fichier ${filePath}:`, err);
+      } else {
+        console.log(`Nom du participant écrit dans ${filePath}: ${participantName}`);
+      }
+    });
+  }
+}
+
+
+function verifierEtLancerQPUC(channel) {
+  if (participantsQPUC.size >= 4) {
+    qpucEnCours = true;
+    bot.say(channel, `Début du jeu QPUC avec les participants : ${Array.from(participantsQPUC).join(', ')}`);
+    changerSceneQPUC(); // Changer la scène si le nombre de participants est suffisant
+  }
+}
+
+function attribuerEtActiverAvatars() {
+  const participantsArray = Array.from(participantsQPUC);
+  
+  participantsArray.forEach((participant, index) => {
+    // Choisir un avatar aléatoire pour chaque participant
+    const avatarChoisi = avatars[Math.floor(Math.random() * avatars.length)];
+    // Déterminer le suffixe en fonction de l'ordre du participant
+    const suffixe = ['EG', 'G', 'D', 'ED'][index];
+    // Construire le nom complet de l'avatar
+    const nomAvatar = avatarChoisi + suffixe;
+    // Activer l'avatar dans OBS
+    activerAvatarDansOBS(nomAvatar);
+  });
+}
+
+function activerAvatarDansOBS(nomAvatar) {
+  obs.call('SetSceneItemEnabled', {
+    'sceneName': 'QPUC', // Remplacez par le nom de votre scène QPUC dans OBS
+    'sourceName': nomAvatar, // Nom de la source de l'avatar dans OBS
+    'sceneItemEnabled': true // Activer l'avatar
+  }).then(() => {
+    console.log(`Avatar ${nomAvatar} activé dans OBS`);
+  }).catch(err => {
+    console.error(`Erreur lors de l'activation de l'avatar ${nomAvatar} dans OBS:`, err);
+  });
+}
+
 // Connexion au serveur Twitch
 bot.connect();
 
@@ -559,16 +639,32 @@ bot.on('message', (channel, tags, message, self) => {
 
   const command = message.trim().toLowerCase();
 
-  if (message.toLowerCase() === '!invocation' && tags.username === 'oderun') {
-    axios.post('http://localhost:3000/ask', { question: 'Posez votre question' })
-        .then(response => {
-            const reply = response.data.reply;
-            bot.say(channel, reply);
-        })
-        .catch(error => {
-            console.error('Erreur lors de l\'envoi de la question:', error);
-            bot.say(channel, 'Désolé, je ne peux pas répondre en ce moment.');
-        });
+  if (command === '!qpuc' && !qpucEnCours) {
+    qpucEnCours = true;
+    participantsQPUC.clear();
+    participantsQPUC.add(tags.username); // Ajouter l'initiateur comme participant
+    ecrireNomsParticipants();
+    bot.say(channel, "Jeu Question pour un Champion lancé ! Tapez !participe pour rejoindre. Vous avez 60 secondes.");
+
+    // Timer de 60 secondes pour rejoindre
+    timerQPUC = setTimeout(() => {
+      if (participantsQPUC.size >= 4) { // Minimum 4 participants
+        bot.say(channel, `Le jeu commence avec les participants : ${Array.from(participantsQPUC).join(', ')}`);
+        verifierEtLancerQPUC(channel);
+        attribuerEtActiverAvatars();
+      } else {
+        bot.say(channel, "Pas assez de participants pour commencer le jeu.");
+        qpucEnCours = false;
+      }
+    }, 60000);
+  }
+
+  // Participer au jeu QPUC
+  if (command === '!participe' && qpucEnCours) {
+    participantsQPUC.add(tags.username);
+    ecrireNomsParticipants();
+    bot.say(channel, `${tags.username} a rejoint le jeu QPUC.`);
+
       } else if (command === '!new' && tags.username === 'oderun') {
     afficherPokemonAleatoire();
     if (command === '!catch') {
