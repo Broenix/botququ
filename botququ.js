@@ -39,33 +39,9 @@ const bot = new tmi.Client({
   channels: ['oderun'],
 });
 // Questions et réponses
-const questions = [
-  { question: "Quelle est ma date de naissance ? (JJ/MM/AAAA)", reponse: "15/09/1991" },
-  { question: "Quelle est ma couleur favoris ?", reponse: "Gris" },
-  { question: "Quel est mon animal totem ?", reponse: "sanglier" },
-  { question: "Quel est mon signe astrologique ?", reponse: "vierge" },
-  { question: "Quel est mon plat favoris", reponse: "Porc au caramel" },
-  { question: "Quel est mon dessert favoris", reponse: "foret noire" },
-  { question: "Quel pays je reve de visiter", reponse: "japon" },
-  { question: "Street food favoris", reponse: "kebab" },
-  { question: "Quel est le nom de ma tortue", reponse: "Janine" },
-  { question: "Quel est mon animal favoris", reponse: "chien" },
-  { question: "Quel est mon film pas d'animation favoris", reponse: "12 hommes en colère" },
-  { question: "Quel est mon film d'animation favoris", reponse: "Le voyage de Chihiro" },
-  { question: "Quel est le pays le plus loin de la France ou je suis allé", reponse: "australie" },
-  { question: "Je suis plutôt de gauche ou de droite", reponse: "gauche" },
-  { question: "Quel est mon film Twilight favoris", reponse: "premier" },
-  { question: "Mon manga favoris", reponse: "hunter x hunter"},
-  { question: "Mon anime favoris", reponse: "jujutsu kaisen"},
-  { question: "Mon jeu auquel je joue le plus", reponse: "isaac"},
-  { question: "Le meilleur jeu du monde selon moi", reponse: "Outer Wilds"},
-  { question: "Mon fruit favoris", reponse: "fraise"},
-  { question: "Mon signe du zodiaque chinois", reponse: "chevre"},
-  { question: "Mon style de musique favoris", reponse: "rap"},
-  { question: "Mon rappeur favoris", reponse: "Kanye West"},
-  { question: "Ma plus grande phobie", reponse: "profondeurs"},
-  { question: "Ma recette que je fais le mieux", reponse: "Pâtes au bleu*"},
-];
+const questions = require('./questionsZAmour.js');
+const questionsCultureGenerale = require('./questionsQPUC.js');
+
 
 let coeursRougesActifs = [];
 let coeursJaunesActifs = [];
@@ -87,6 +63,11 @@ let pokemonCapturePar = {};
 let qpucEnCours = false;
 let participantsQPUC = new Set();
 let timerQPUC = null;
+let nombreDeParticipants = 0;
+let scores = {};
+let timerQuestion = null;
+let zamourEnCours = false;
+let scenePrecedenteQPUC;
 
 app.use(bodyParser.json());
 
@@ -571,7 +552,6 @@ function changerSceneQPUC() {
   });
 }
 
-// Écrire les noms des participants dans des fichiers
 function ecrireNomsParticipants() {
   const participantsArray = Array.from(participantsQPUC);
   console.log("Écriture des noms des participants dans les fichiers");
@@ -590,6 +570,23 @@ function ecrireNomsParticipants() {
   }
 }
 
+function lancerQPUC() {
+
+    scores = {};
+    participantsQPUC.forEach(username => { scores[username] = 0; });
+    poserQuestion();
+}
+
+function poserQuestion() {
+  questionActuelle = questionsCultureGenerale[Math.floor(Math.random() * questionsCultureGenerale.length)];
+  fs.writeFileSync('qpucMessage.txt', `Question : ${questionActuelle.question}`);
+  bot.say(channel, `Question : ${questionActuelle.question}`);
+  timerQuestion = setTimeout(() => {
+    questionActuelle = null;
+    bot.say(channel, "Temps écoulé ! Question suivante.");
+    poserQuestion();
+  }, 10000); // 10 secondes pour répondre
+}
 
 function verifierEtLancerQPUC(channel) {
   if (participantsQPUC.size >= 4) {
@@ -599,34 +596,121 @@ function verifierEtLancerQPUC(channel) {
   }
 }
 
-function attribuerEtActiverAvatars() {
-  const participantsArray = Array.from(participantsQPUC);
-  
-  participantsArray.forEach((participant, index) => {
-    // Choisir un avatar aléatoire pour chaque participant
+function attribuerEtActiverAvatarPourParticipant(username) {
+  const suffixes = ['EG', 'G', 'D', 'ED'];
+  if (nombreDeParticipants < suffixes.length) {
     const avatarChoisi = avatars[Math.floor(Math.random() * avatars.length)];
-    // Déterminer le suffixe en fonction de l'ordre du participant
-    const suffixe = ['EG', 'G', 'D', 'ED'][index];
-    // Construire le nom complet de l'avatar
+    const suffixe = suffixes[nombreDeParticipants];
     const nomAvatar = avatarChoisi + suffixe;
-    // Activer l'avatar dans OBS
     activerAvatarDansOBS(nomAvatar);
-  });
+    nombreDeParticipants++;
+  } else {
+    console.log('Nombre maximum de participants atteint.');
+  }
 }
 
-function activerAvatarDansOBS(nomAvatar) {
-  obs.call('SetSceneItemEnabled', {
-    'sceneName': 'QPUC', // Remplacez par le nom de votre scène QPUC dans OBS
-    'sourceName': nomAvatar, // Nom de la source de l'avatar dans OBS
-    'sceneItemEnabled': true // Activer l'avatar
-  }).then(() => {
-    console.log(`Avatar ${nomAvatar} activé dans OBS`);
+async function getSceneItemId(sceneName, sourceName) {
+  try {
+    const response = await obs.call('GetSceneItemList', { sceneName });
+    const sceneItem = response.sceneItems.find(item => item.sourceName === sourceName);
+    return sceneItem ? sceneItem.sceneItemId : null;
+  } catch (error) {
+    console.error('Erreur lors de la récupération de sceneItemId:', error);
+    return null;
+  }
+}
+
+async function activerAvatarDansOBS(nomAvatar) {
+  const sceneItemId = await getSceneItemId('QPUC', nomAvatar);
+  if (sceneItemId) {
+    obs.call('SetSceneItemEnabled', {
+      'sceneName': 'QPUC',
+      'sceneItemId': sceneItemId,
+      'sceneItemEnabled': true
+    }).then(() => {
+      console.log(`Avatar ${nomAvatar} activé dans OBS`);
+    }).catch(err => {
+      console.error(`Erreur lors de l'activation de l'avatar ${nomAvatar} dans OBS:`, err);
+    });
+  } else {
+    console.error(`sceneItemId introuvable pour ${nomAvatar}`);
+  }
+}
+
+function attribuerEtActiverAvatarPourJoueur1() {
+  const avatarChoisi = avatars[Math.floor(Math.random() * avatars.length)];
+  const nomAvatar = avatarChoisi + 'EG'; // EG pour le joueur 1
+  activerAvatarDansOBS(nomAvatar);
+}
+
+function annulerQPUC() {
+  // Désactiver les avatars, effacer les pseudos, réinitialiser les scores...
+  participantsQPUC.clear();
+  qpucEnCours = false;
+  // Ajoutez le code nécessaire ici
+}
+
+function changerSceneQPUC() {
+  obs.call('GetCurrentProgramScene').then(response => {
+    scenePrecedenteQPUC = response.currentProgramSceneName;
+    obs.call('SetCurrentProgramScene', {
+      'sceneName': 'QPUC' // Nom de la scène QPUC
+    }).then(() => {
+      console.log('Scène changée en QPUC');
+      ecrireNomsParticipants();
+      // autres actions nécessaires
+    }).catch(err => {
+      console.error('Erreur lors du changement de scène:', err);
+    });
   }).catch(err => {
-    console.error(`Erreur lors de l'activation de l'avatar ${nomAvatar} dans OBS:`, err);
+    console.error('Erreur lors de la récupération de la scène actuelle:', err);
   });
 }
 
+function retournerScenePrecedenteQPUC() {
+  // Attendre 5 secondes avant de changer de scène
+  setTimeout(() => {
+    if (scenePrecedenteQPUC) {
+      obs.call('SetCurrentProgramScene', {
+        'sceneName': scenePrecedenteQPUC
+      }).catch(err => {
+        console.error('Erreur lors du retour à la scène précédente:', err);
+      });
+    }
+  }, 5000); // Délai de 5 secondes (5000 millisecondes)
+}
+
+function ecrireMessageAttente() {
+  fs.writeFileSync('qpucMessage.txt', 'En attente de participants, tape !participe pour rejoindre le lobby !');
+}
+
+function reinitialiserQPUC() {
+  participantsQPUC.clear();
+  qpucEnCours = false;
+  clearTimeout(timerQPUC); // Assurez-vous d'annuler le timer en cours si nécessaire
+  // Autres réinitialisations si nécessaire...
+
+  // Réécrire le message d'attente après un délai
+  setTimeout(ecrireMessageAttente, 10000);
+}
+
+function miseAJourTimerQPUC() {
+  if (qpucEnCours) {
+    // Si le jeu QPUC est en cours, mettez à jour le timer pour la question
+    fs.writeFileSync('timerqpuc.txt', tempsRestant.toString());
+  } else {
+    // Si le jeu QPUC n'est pas encore commencé, mettez à jour le timer pour rejoindre
+    fs.writeFileSync('timerqpuc.txt', tempsPourRejoindre.toString());
+  }
+}
+
+/* *************************************
+****************************************
+****************************************
 // Connexion au serveur Twitch
+****************************************
+****************************************
+ ************************************* */
 bot.connect();
 
 bot.on('connected', (address, port) => {
@@ -639,33 +723,59 @@ bot.on('message', (channel, tags, message, self) => {
 
   const command = message.trim().toLowerCase();
 
+  ecrireMessageAttente()
+  
   if (command === '!qpuc' && !qpucEnCours) {
-    qpucEnCours = true;
-    participantsQPUC.clear();
-    participantsQPUC.add(tags.username); // Ajouter l'initiateur comme participant
-    ecrireNomsParticipants();
-    bot.say(channel, "Jeu Question pour un Champion lancé ! Tapez !participe pour rejoindre. Vous avez 60 secondes.");
+    if (zamourEnCours) {
+      bot.say(channel, "Le jeu des Z'amours est en cours. Veuillez attendre la fin de cette partie pour lancer QPUC.");
+    } else if (!qpucEnCours) {
+      qpucEnCours = true;
+      changerSceneQPUC();
+      participantsQPUC.clear();
+      participantsQPUC.add(tags.username); // Ajouter l'initiateur comme participant
+      ecrireNomsParticipants();
+      attribuerEtActiverAvatarPourJoueur1();
 
-    // Timer de 60 secondes pour rejoindre
-    timerQPUC = setTimeout(() => {
-      if (participantsQPUC.size >= 4) { // Minimum 4 participants
-        bot.say(channel, `Le jeu commence avec les participants : ${Array.from(participantsQPUC).join(', ')}`);
-        verifierEtLancerQPUC(channel);
-        attribuerEtActiverAvatars();
-      } else {
-        bot.say(channel, "Pas assez de participants pour commencer le jeu.");
-        qpucEnCours = false;
-      }
-    }, 60000);
+      bot.say(channel, "Jeu Question pour un Champion lancé ! Tapez !participe pour rejoindre. Vous avez 60 secondes.");
+
+      // Timer de 60 secondes pour rejoindre
+      timerQPUC = setTimeout(() => {
+        if (participantsQPUC.size >= 4) { // Minimum 4 participants
+          bot.say(channel, `Le jeu commence avec les participants : ${Array.from(participantsQPUC).join(', ')}`);
+          verifierEtLancerQPUC(channel);
+          attribuerEtActiverAvatars();
+          bot.say(channel, `Et c'est tipar pour une partie de Question Pour Un Champion`);
+          lancerQPUC();
+          if (questionActuelle && command === questionActuelle.reponse) {
+            clearTimeout(timerQuestion);
+            scores[tags.username] += questionActuelle.points;
+            bot.say(channel, `Bonne réponse de ${tags.username} !`);
+            if (scores[tags.username] >= 10) {
+              bot.say(channel, `${tags.username} a gagné avec 10 points !`);
+              annulerQPUC();
+              retournerScenePrecedenteQPUC();
+            } else {
+              poserQuestion();
+            }
+          }
+        } else {
+          bot.say(channel, "Pas assez de participants pour commencer le jeu.");
+          qpucEnCours = false;
+          retournerScenePrecedenteQPUC();
+        }
+      }, 60000);
+    }
   }
-
   // Participer au jeu QPUC
   if (command === '!participe' && qpucEnCours) {
-    participantsQPUC.add(tags.username);
-    ecrireNomsParticipants();
-    bot.say(channel, `${tags.username} a rejoint le jeu QPUC.`);
-
-      } else if (command === '!new' && tags.username === 'oderun') {
+    if (!participantsQPUC.has(tags.username)) {
+      participantsQPUC.add(tags.username);
+      attribuerEtActiverAvatarPourParticipant(tags.username);
+      bot.say(channel, `${tags.username} a rejoint le jeu QPUC.`);
+    } else {
+      bot.say(channel, `${tags.username}, tu es déjà inscrit au jeu.`);
+    }
+  } else if (command === '!new' && tags.username === 'oderun') {
     afficherPokemonAleatoire();
     if (command === '!catch') {
       const username = tags.username;
@@ -711,91 +821,95 @@ bot.on('message', (channel, tags, message, self) => {
     }
   } else if (command === '!zamour' && viewerInitiateur === null) {
     // Vérifier si 10 minutes se sont écoulées depuis la dernière partie
-    const maintenant = new Date().getTime();
-    const differenceTemps = (maintenant - dernierePartieTimestamp) / (1000 * 60); // Différence en minutes
+    if (qpucEnCours) {
+      bot.say(channel, "Le jeu Question pour un Champion est en cours. Veuillez attendre la fin de cette partie pour lancer les Z'amours.");
+    } else if (!zamourEnCours) {
+      const maintenant = new Date().getTime();
+      const differenceTemps = (maintenant - dernierePartieTimestamp) / (1000 * 60); // Différence en minutes
 
-    if (joueursAyantDejaJoue.has(tags.username)) {
-      bot.say(channel, `Désolé, ${tags.username}, tu as déjà joué cette session.`);
-      return;
-    } else if (differenceTemps >= 10) {
-      // Répondre à la commande !zamour avec le pseudo de la personne qui l'a envoyée
-      changerSceneZamour();
-      viewerInitiateur = tags.username;
-      bot.say(channel, `Ok, c'est parti pour les z'amours avec toi, ${viewerInitiateur} !`);
-      fs.writeFileSync('pseudozamour.txt', viewerInitiateur);
-      // Commencer le jeu des questions
-      commencerJeuDesQuestions(channel);
-      
-      // Mettre à jour le timestamp de la dernière partie
-      dernierePartieTimestamp = maintenant;
-    } else {
-      bot.say(channel, `Désolé, attends encore un peu avant de lancer une nouvelle partie.`);
-    }
-  } else if (questionActuelle && tags.username === viewerInitiateur) {
-    // Vérifier la réponse à la question actuelle
-    const reponseAttendue = questionActuelle.reponse.toLowerCase().trim();
-    const reponseDonnee = command.toLowerCase().trim();
-
-    if (verifierReponse(reponseDonnee, reponseAttendue)) {
-      jouerSonReponseCorrecte();
-      bonnesReponsesConsecutives++;
-      numeroQuestionActuelle++;
-
-      if (bonnesReponsesConsecutives >= 5) {
-        bot.say(channel, `Félicitations, ${viewerInitiateur} ! Tu gagnes dix points !`);
-        if (viewerInitiateur) { // Vérifier que viewerInitiateur n'est pas null
-          mettreAJourPoints(viewerInitiateur);
-        }
-        // Réinitialiser le jeu
-        joueursAyantDejaJoue.add(viewerInitiateur);
-        activerGroupeVictoire();
-        retournerScenePrecedente();
-        questionActuelle = null;
-        bonnesReponsesConsecutives = 0;
-        viewerInitiateur = null; // Réinitialiser viewerInitiateur après la mise à jour des points
-        echecs = 0;
-        reponseCorrecte();
-        reinitialiserJeu();
-        setTimeout(() => {
-          desactiverCoeurs();
-        }, 3000);
-      } else {
-        reponseCorrecte();  // Assurez-vous d'avoir les parenthèses ici
-        questionsRestantes = questionsRestantes.filter((q) => q !== questionActuelle);
-        bot.say(channel, `Bravo ${viewerInitiateur} ! Question suivante.`);
+      if (joueursAyantDejaJoue.has(tags.username)) {
+        bot.say(channel, `Désolé, ${tags.username}, tu as déjà joué cette session.`);
+        return;
+      } else if (differenceTemps >= 10) {
+        // Répondre à la commande !zamour avec le pseudo de la personne qui l'a envoyée
+        changerSceneZamour();
+        viewerInitiateur = tags.username;
+        bot.say(channel, `Ok, c'est parti pour les z'amours avec toi, ${viewerInitiateur} !`);
+        fs.writeFileSync('pseudozamour.txt', viewerInitiateur);
+        // Commencer le jeu des questions
         commencerJeuDesQuestions(channel);
-      }
-    } else {
-      // Logique pour une réponse incorrecte...
-      reponseIncorrecte();  // Masque coeurjaune1
-      jouerSonReponseIncorrecte();
-      echecs++;
-      numeroQuestionActuelle++;
-
-      if (echecs >= 5) {
-        // Fin de la partie après 3 échecs consécutifs
-        bot.say(channel, `Trop d'échecs, ${viewerInitiateur} ! Fin de la partie.`);// À la fin de la partie, après les vérifications nécessaires
-        joueursAyantDejaJoue.add(viewerInitiateur);
-        setTimeout(() => {
-          desactiverCoeurs();
-        }, 3000);
-        reinitialiserJeu();
-        retournerScenePrecedente();
         
-        // Vider le fichier texte
-        fs.writeFileSync('question.txt', '');
-        fs.writeFileSync('pseudozamour.txt', '');
-        // Réinitialiser les variables de jeu
-        questionActuelle = null;
-        bonnesReponsesConsecutives = 0;
-        viewerInitiateur = null;
-        echecs = 0; // Réinitialise le nombre d'échecs
+        // Mettre à jour le timestamp de la dernière partie
+        dernierePartieTimestamp = maintenant;
       } else {
-        bot.say(channel, `Dommage ${viewerInitiateur} ! Mauvaise réponse !`);
-        commencerJeuDesQuestions(channel);  // Appeler la fonction pour la nouvelle question
+        bot.say(channel, `Désolé, attends encore un peu avant de lancer une nouvelle partie.`);
       }
-    }
-  } 
+    } else if (questionActuelle && tags.username === viewerInitiateur) {
+      // Vérifier la réponse à la question actuelle
+      const reponseAttendue = questionActuelle.reponse.toLowerCase().trim();
+      const reponseDonnee = command.toLowerCase().trim();
+
+      if (verifierReponse(reponseDonnee, reponseAttendue)) {
+        jouerSonReponseCorrecte();
+        bonnesReponsesConsecutives++;
+        numeroQuestionActuelle++;
+
+        if (bonnesReponsesConsecutives >= 5) {
+          bot.say(channel, `Félicitations, ${viewerInitiateur} ! Tu gagnes dix points !`);
+          if (viewerInitiateur) { // Vérifier que viewerInitiateur n'est pas null
+            mettreAJourPoints(viewerInitiateur);
+          }
+          // Réinitialiser le jeu
+          joueursAyantDejaJoue.add(viewerInitiateur);
+          activerGroupeVictoire();
+          retournerScenePrecedente();
+          questionActuelle = null;
+          bonnesReponsesConsecutives = 0;
+          viewerInitiateur = null; // Réinitialiser viewerInitiateur après la mise à jour des points
+          echecs = 0;
+          reponseCorrecte();
+          reinitialiserJeu();
+          setTimeout(() => {
+            desactiverCoeurs();
+          }, 3000);
+        } else {
+          reponseCorrecte();  // Assurez-vous d'avoir les parenthèses ici
+          questionsRestantes = questionsRestantes.filter((q) => q !== questionActuelle);
+          bot.say(channel, `Bravo ${viewerInitiateur} ! Question suivante.`);
+          commencerJeuDesQuestions(channel);
+        }
+      } else {
+        // Logique pour une réponse incorrecte...
+        reponseIncorrecte();  // Masque coeurjaune1
+        jouerSonReponseIncorrecte();
+        echecs++;
+        numeroQuestionActuelle++;
+
+        if (echecs >= 5) {
+          // Fin de la partie après 3 échecs consécutifs
+          bot.say(channel, `Trop d'échecs, ${viewerInitiateur} ! Fin de la partie.`);// À la fin de la partie, après les vérifications nécessaires
+          joueursAyantDejaJoue.add(viewerInitiateur);
+          setTimeout(() => {
+            desactiverCoeurs();
+          }, 3000);
+          reinitialiserJeu();
+          retournerScenePrecedente();
+          
+          // Vider le fichier texte
+          fs.writeFileSync('question.txt', '');
+          fs.writeFileSync('pseudozamour.txt', '');
+          // Réinitialiser les variables de jeu
+          questionActuelle = null;
+          bonnesReponsesConsecutives = 0;
+          viewerInitiateur = null;
+          echecs = 0; // Réinitialise le nombre d'échecs
+        } else {
+          bot.say(channel, `Dommage ${viewerInitiateur} ! Mauvaise réponse !`);
+          commencerJeuDesQuestions(channel);  // Appeler la fonction pour la nouvelle question
+        }
+      }
+    } 
+  }
 });
 /*
   } else if (command.startsWith('!ajout')) {
